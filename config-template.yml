@@ -1,0 +1,26 @@
+logging:
+    path: /var/log/ldap_ssh_authorizedkeys.log
+    level: INFO
+    format: '%(asctime)s.%(msecs)d %(levelname)s %(module)s - %(funcName)s: %(message)s'
+    date_time_format: '%Y-%m-%d %H:%M:%S'
+ldap:
+    timeout: -1
+    debug: False
+    url: 'ldaps://ud.example.com'
+    base: 'dc=example,dc=com'
+    search_group: 'SSH users'
+    searchreq_attrlist: ['uid', 'SshPublicKey']
+    username_attribute: 'uid'
+    publickey_attribute: 'SshPublicKey'
+    cacert: '/etc/pki/tls/certs/example.crt'
+    referrals: 0
+    protocol_version: 3
+    trace_level: 0
+    retry_max: 100
+    retry_delay: 2
+kinit:
+    executable: '/usr/bin/kinit'
+    args: '-kt'
+    keytab: '/etc/directoryagent.keytab'
+    userid: 'directoryagent'
+    realm: 'EXAMPLE.COM'

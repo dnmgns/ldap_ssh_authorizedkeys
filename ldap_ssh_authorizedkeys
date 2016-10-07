@@ -1,0 +1,133 @@
+#!/usr/bin/python
+
+"""ldap_ssh_authorizedkeys.py: Get SSH Public Key from LDAP attribute."""
+
+__author__      = "Magnus Lindvall <magnus@dnmgns.com>"
+
+import re, ldap, sys, logging, subprocess, yaml
+from os import path
+from ldap.ldapobject import ReconnectLDAPObject
+
+# load config
+if(path.exists('config.yml')):
+    cfgfile = 'config.yml'
+else:
+    cfgfile = '/etc/ldap_ssh_authorizedkeys.yml'
+
+try:
+    with open(cfgfile, 'r') as cfgfile:
+        c = yaml.load(cfgfile)
+except:
+    print('No configuration file found.')
+
+# config logging
+logging.basicConfig(filename=c['logging']['path'], level=c['logging']['level'],
+                    format=c['logging']['format'], datefmt=c['logging']['date_time_format'])
+
+
+class SearchObject:
+    def LDAPSearch(self, base, scope, filterstr='(objectClass=*)',
+                   attrlist=None, attrsonly=0, serverctrls=None, clientctrls=None,
+                   timeout=c['ldap']['timeout'], sizelimit=0):
+        while True:  # loop for reconnecting if necessary
+            try:
+                # Search request
+                msgid = self.search_ext(
+                    base,
+                    scope,
+                    filterstr=filterstr,
+                    attrlist=attrlist,
+                    attrsonly=attrsonly,
+                    serverctrls=(serverctrls),
+                    clientctrls=clientctrls,
+                    timeout=timeout,
+                    sizelimit=sizelimit
+                )
+
+                rtype, rdata, rmsgid, rctrls = self.result3(msgid)
+
+            except ldap.SERVER_DOWN as e:
+                try:
+                    self.reconnect(self._uri)
+                except AttributeError:
+                    raise e
+
+            else:
+                return rdata
+
+
+class LDAPObject(ReconnectLDAPObject, SearchObject):
+    pass
+
+
+def kinit(keytab, userid, realm):
+    kinit = c['kinit']['executable']
+    kinit_args = [kinit, c['kinit']['args'], keytab, '{0}@{1}'.format(userid, realm)]
+    kinit = subprocess.Popen(kinit_args)
+    kinit.wait()
+
+
+def ldap_getpublickey(username):
+    url = c['ldap']['url']
+    base = c['ldap']['base']
+    search_flt = r'(&(snetMemberOf={0})(uid={1}))'.format(c['ldap']['search_group'],username)
+    searchreq_attrlist = c['ldap']['searchreq_attrlist']
+
+    kinit(c['kinit']['keytab'], c['kinit']['userid'], c['kinit']['realm'])
+
+    if(c['ldap']['debug'] == True):
+        ldap.set_option(ldap.OPT_DEBUG_LEVEL,255)
+    ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_NEVER)
+    try:
+        ldap.set_option(ldap.OPT_X_TLS_CACERTFILE, c['ldap']['cacert'])
+    except:
+        pass
+    ldap.set_option(ldap.OPT_REFERRALS, c['ldap']['referrals'])
+    l = LDAPObject(url, trace_level=c['ldap']['trace_level'],
+                   retry_max=c['ldap']['retry_max'],
+                   retry_delay=c['ldap']['retry_delay'])
+    l.protocol_version = c['ldap']['protocol_version']
+    auth_tokens = ldap.sasl.gssapi()
+    l.sasl_interactive_bind_s('', auth_tokens)
+
+    # Send search request
+    ldap_result = l.LDAPSearch(
+        base,
+        ldap.SCOPE_SUBTREE,
+        search_flt,
+        attrlist=searchreq_attrlist,
+        serverctrls=None
+    )
+
+    logging.info("Found {0} key(s) for {1}".format(len(ldap_result), username))
+
+    l.unbind_s()
+
+    for k, v in ldap_result:
+        ssh_publickey_attribute = c['ldap']['publickey_attribute']
+        if ssh_publickey_attribute in v:
+            if (len(v[ssh_publickey_attribute]) > 0):
+                ssh_public_key = ('{0}'.format(v[ssh_publickey_attribute][0]))
+                return ssh_public_key
+
+
+def main(argv):
+    try:
+        username = argv[0]
+        # strip @ from username, this can be enhanced
+        short_username = re.split('(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)', username)
+        short_username = username.split("@")[0]
+    except:
+        print('No username specified, usage: script <username>')
+        sys.exit(2)
+
+    ssh_public_key = ldap_getpublickey(short_username)
+
+    logging.info('Lookup ssh public key for {0}'.format(short_username))
+    logging.debug('SSH Key for {0} is {1}'.format(short_username, ssh_public_key))
+
+    print(ssh_public_key)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
