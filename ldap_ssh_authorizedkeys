@@ -99,16 +99,16 @@ def ldap_getpublickey(username):
         serverctrls=None
     )
 
-    logging.info("Found {0} key(s) for {1}".format(len(ldap_result), username))
-
     l.unbind_s()
 
     for k, v in ldap_result:
         ssh_publickey_attribute = c['ldap']['publickey_attribute']
         if ssh_publickey_attribute in v:
             if (len(v[ssh_publickey_attribute]) > 0):
-                ssh_public_key = ('{0}'.format(v[ssh_publickey_attribute][0]))
-                return ssh_public_key
+                return v['snetSshPublicKey']
+        else:
+            logging.info("Found 0 key(s) for {1}".format(username))
+            return ['zsdfz','zsdfds']
 
 
 def main(argv):
@@ -124,10 +124,15 @@ def main(argv):
     ssh_public_key = ldap_getpublickey(short_username)
 
     logging.info('Lookup ssh public key for {0}'.format(short_username))
-    logging.debug('SSH Key for {0} is {1}'.format(short_username, ssh_public_key))
 
-    print(ssh_public_key)
-
+    try:
+        if(len(ssh_public_key) > 0):
+            logging.debug('SSH Key for {0} is {1}'.format(short_username, ssh_public_key))
+            logging.info("Found {0} key(s) for {1}".format(len(ssh_public_key), username))
+            print '\n'.join(ssh_public_key)
+    except:
+        logging.info("Found 0 key(s) for {0}".format(username))
 
 if __name__ == "__main__":
     main(sys.argv[1:])
+
